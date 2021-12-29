@@ -3,6 +3,7 @@ import requests
 from fpdf import FPDF
 from fpdf import Template
 import math
+import configparser
 
 
 def field_or_default(arr, field, default=None):
@@ -13,18 +14,20 @@ def field_or_default(arr, field, default=None):
 
 
 if __name__ == '__main__':
+    config = configparser.ConfigParser()
+    config.read('config.ini')
 
     # Return records in requested table using Airtable API
     def get_table_from_airtable(table_name):
         offset = None
         airtable_records = []
         while True:
-            base_id = "app3LTLEWbtN7idbp"
+            base_id = config['DEFAULT']['BaseID']
             url = "https://api.airtable.com/v0/" + base_id + "/" + table_name
             params = {}
             if offset is not None:
                 params = {'offset': offset}
-            api_key = ""
+            api_key = config['DEFAULT']['APIKey']
             headers = {"Authorization": "Bearer " + api_key}
             response = requests.get(url, params=params, headers=headers)
             airtable_response = response.json()

@@ -127,3 +127,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Don't upload the config file
+config.ini
+
+# Don't upload the PDF
+*.pdf

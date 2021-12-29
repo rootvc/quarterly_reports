@@ -1,0 +1,4 @@
+[DEFAULT]
+# These values are found in the airtable API
+BaseID=app1234567
+APIKey=key1234567
