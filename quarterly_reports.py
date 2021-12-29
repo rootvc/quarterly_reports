@@ -12,31 +12,33 @@ def field_or_default(arr, field, default=None):
     else:
         return default
 
+ # Return records in requested table using Airtable API
+
+
+def get_table_from_airtable(table_name):
+    offset = None
+    airtable_records = []
+    while True:
+        base_id = config['DEFAULT']['BaseID']
+        url = "https://api.airtable.com/v0/" + base_id + "/" + table_name
+        params = {}
+        if offset is not None:
+            params = {'offset': offset}
+        api_key = config['DEFAULT']['APIKey']
+        headers = {"Authorization": "Bearer " + api_key}
+        response = requests.get(url, params=params, headers=headers)
+        airtable_response = response.json()
+        airtable_records.extend(airtable_response['records'])
+        if 'offset' in airtable_response:
+            offset = airtable_response['offset']
+        else:
+            break
+    return airtable_records
+
 
 if __name__ == '__main__':
     config = configparser.ConfigParser()
     config.read('config.ini')
-
-    # Return records in requested table using Airtable API
-    def get_table_from_airtable(table_name):
-        offset = None
-        airtable_records = []
-        while True:
-            base_id = config['DEFAULT']['BaseID']
-            url = "https://api.airtable.com/v0/" + base_id + "/" + table_name
-            params = {}
-            if offset is not None:
-                params = {'offset': offset}
-            api_key = config['DEFAULT']['APIKey']
-            headers = {"Authorization": "Bearer " + api_key}
-            response = requests.get(url, params=params, headers=headers)
-            airtable_response = response.json()
-            airtable_records.extend(airtable_response['records'])
-            if 'offset' in airtable_response:
-                offset = airtable_response['offset']
-            else:
-                break
-        return airtable_records
 
     # Pulls Company Airtable and creates a id<>name lookup table
     companies = get_table_from_airtable("Companies")
@@ -53,7 +55,8 @@ if __name__ == '__main__':
                 'Quarterly Update': field_or_default(fields, 'Quarterly Update'),
                 'Logo': field_or_default(fields, 'Logo'),
                 'URL': field_or_default(fields, 'URL'),
-                'Initial Investment': field_or_default(fields, 'Initial Investment')}
+                'Initial Investment': field_or_default(fields, 'Initial Investment'),
+                'Status': field_or_default(fields, 'Status')}
     # print(company_lookup)
 
     # Pulls Vehicle Airtable and creates a id<>name lookup table
@@ -89,7 +92,7 @@ if __name__ == '__main__':
                        'Entry Valuation': field_or_default(fields, 'Entry Valuation (Post or Cap)'),
                        'Root Investment': field_or_default(fields, 'Root Investment Cost'),
                        'Total Value': field_or_default(fields, 'Total Value'),
-                       'Root FD %': field_or_default(fields, 'Root FD %')}
+                       'Root FD % (Last Closed Round)': field_or_default(fields, 'Root FD % (Last Closed Round)')}
             summaries.append(summary)
     summaries = sorted(summaries, key=lambda x: x['Date'])
 
@@ -113,8 +116,9 @@ if __name__ == '__main__':
 
         # Iterate through alphabetically sorted companies within the specific vehicle and generate the pages of operational reports
         for company in sorted(company_lookup, key=lambda k: company_lookup[k]['Name']):
-            # print(company_lookup[company]['Initial Investment'])
-            if (vehicle in company_lookup[company]['Vehicles']) and (company_lookup[company]['Initial Investment'][0] <= "2021-09-30"):
+
+            if (vehicle in company_lookup[company]['Vehicles']) and (company_lookup[company]['Initial Investment'][0] <= "2021-09-30") and (company_lookup[company]['Status'] == 'Active'):
+                # print(company_lookup[company]['Status'])
                 logo_url = company_lookup[company]['Logo'][0]['url'] or ""
                 if company_lookup[company]['CEO'] is not None:
                     founder_txt = "CEO: " + \
@@ -130,13 +134,14 @@ if __name__ == '__main__':
                 fd_ownership = 0
                 for summary in summaries:
                     if (summary['Company'] == company_lookup[company]['Name']) and (summary['Date'] <= "2021-09-30") and (summary['Vehicle'][0] in vehicle_lookup):
-                        if type(summary['Root FD %']) is dict:
+                        if (type(summary['Root FD % (Last Closed Round)']) is dict) or (summary['Root FD % (Last Closed Round)'] is None):
                             fd_ownership = None
                             break
                         else:
-                            fd_ownership = fd_ownership + summary['Root FD %']
+                            fd_ownership = fd_ownership + \
+                                summary['Root FD % (Last Closed Round)']
                 if fd_ownership == None:
-                    ownership_txt = "Ownership: "
+                    ownership_txt = "Ownership: N/A"
                 else:
                     ownership_txt = "Ownership: {:.2%}".format(fd_ownership)
                 description_txt = company_lookup[company]['Company Description'] or ""
@@ -151,7 +156,7 @@ if __name__ == '__main__':
                 #pdf.cell(0, 0, txt=company_lookup[company]['Name'])
                 pdf.image(logo_url, x=77.95, y=None, w=60, type='', link='')
                 pdf.set_font('Arial', 'B', 12)
-                pdf.set_y(60)
+                pdf.set_y(55)
                 pdf.cell(
                     0, 7, txt='Overview', ln=1, align="L")
                 pdf.set_font('')
@@ -190,8 +195,14 @@ if __name__ == '__main__':
                 pdf.set_font('')
 
                 # Here's where you print the content of the table
+                total_invested = 0.
+                total_fair_value = 0.
                 for summary in summaries:
                     if (summary['Company'] == company_lookup[company]['Name']) and (summary['Date'] <= "2021-09-30") and (summary['Vehicle'][0] in vehicle_lookup):
+                        total_invested += float(
+                            summary['Root Investment'] or 0)
+                        total_fair_value += float(summary['Total Value'] or 0)
+
                         pdf.cell(
                             52, 7, txt=summary['Investment Round'] or "??", border=1, ln=0, align="L")
                         pdf.cell(
@@ -204,7 +215,21 @@ if __name__ == '__main__':
                             27, 7, txt='${:,.0f}'.format(float(summary['Root Investment'] or 0)), border=1, ln=0, align="L")
                         pdf.cell(
                             27, 7, txt='${:,.0f}'.format(float(summary['Total Value'] or 0)), border=1, ln=1, align="L")
-                # break
+
+                # Total row at bottom of table
+                pdf.set_font('Arial', 'B', 12)
+                pdf.cell(
+                    52, 7, txt='', border=0, ln=0, align="L")
+                pdf.cell(
+                    30, 7, txt='', border=0, ln=0, align="L")
+                pdf.cell(
+                    30, 7, txt='', border=0, ln=0, align="L")
+                pdf.cell(
+                    30, 7, txt='Total: ', border=0, ln=0, align="R")
+                pdf.cell(
+                    27, 7, txt='${:,.0f}'.format(total_invested), border=1, ln=0, align="L")
+                pdf.cell(
+                    27, 7, txt='${:,.0f}'.format(total_fair_value), border=1, ln=1, align="L")
 
                 # Add the operational update here
                 pdf.ln(h='1')
