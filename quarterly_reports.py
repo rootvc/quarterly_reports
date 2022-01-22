@@ -4,6 +4,7 @@ from fpdf import FPDF
 from fpdf import Template
 import math
 import configparser
+import sys
 
 
 def field_or_default(arr, field, default=None):
@@ -12,7 +13,7 @@ def field_or_default(arr, field, default=None):
     else:
         return default
 
- # Return records in requested table using Airtable API
+# Return records in requested table using Airtable API
 
 
 def get_table_from_airtable(table_name):
@@ -40,6 +41,17 @@ if __name__ == '__main__':
     config = configparser.ConfigParser()
     config.read('config.ini')
 
+    quarter = sys.argv[1]
+    year = sys.argv[2]
+    quarters = {
+        'Q1': '03-31',
+        'Q2': '06-30',
+        'Q3': '09-30',
+        'Q4': '12-31'
+    }
+
+    date = year + "-" + quarters[quarter]
+
     # Pulls Company Airtable and creates a id<>name lookup table
     companies = get_table_from_airtable("Companies")
     company_lookup = {}
@@ -56,8 +68,8 @@ if __name__ == '__main__':
                 'Logo': field_or_default(fields, 'Logo'),
                 'URL': field_or_default(fields, 'URL'),
                 'Initial Investment': field_or_default(fields, 'Initial Investment'),
-                'Status': field_or_default(fields, 'Status')}
-    # print(company_lookup)
+                'Status': field_or_default(fields, 'Status'),
+                'Valuation': field_or_default(fields, 'Valuation')}
 
     # Pulls Vehicle Airtable and creates a id<>name lookup table
     vehicles = get_table_from_airtable("Vehicles")
@@ -67,7 +79,6 @@ if __name__ == '__main__':
         if "Fund" in record['fields']['Name']:
             vehicle_lookup[record['id']] = {
                 'Name': field_or_default(fields, 'Name'), 'Logo': field_or_default(fields, 'Logo')}
-    # print(vehicle_lookup)
 
     # Pulls Founder Airtable and creates id<>name lookup table
     founders = get_table_from_airtable("Founders")
@@ -76,7 +87,6 @@ if __name__ == '__main__':
         fields = record['fields']
         founder_lookup[record['id']] = {
             'Full Name': field_or_default(fields, 'Full Name')}
-    # print(founder_lookup)
 
     # Pulls investment rounds table from Airtable
     investment_rounds = get_table_from_airtable("Investment Rounds")
@@ -104,6 +114,7 @@ if __name__ == '__main__':
         vehicle_name = vehicle_lookup[vehicle]['Name']
 
         # Create vehicle cover page with Root Logo
+        quarter_header = quarter + " " + year
         pdf.add_page()
         pdf.set_font("Arial", size=12)
         pdf.image(vehicle_lookup[vehicle]['Logo'][0]['url'],
@@ -112,13 +123,14 @@ if __name__ == '__main__':
         pdf.set_y(150)
         pdf.cell(0, 10, txt=vehicle_name, ln=1, align="C")
         pdf.cell(0, 7, txt="Operational Summaries", ln=1, align="C")
-        pdf.cell(0, 7, txt="Insert Date", ln=1, align="C")
+        pdf.cell(0, 7, txt=quarter_header, ln=1, align="C")
 
         # Iterate through alphabetically sorted companies within the specific vehicle and generate the pages of operational reports
-        for company in sorted(company_lookup, key=lambda k: company_lookup[k]['Name']):
 
-            if (vehicle in company_lookup[company]['Vehicles']) and (company_lookup[company]['Initial Investment'][0] <= "2021-09-30") and (company_lookup[company]['Status'] == 'Active'):
-                # print(company_lookup[company]['Status'])
+        for company in sorted(company_lookup, key=lambda k: company_lookup[k]['Valuation'], reverse=True):
+            valuation = company_lookup[company]['Valuation']
+
+            if (vehicle in company_lookup[company]['Vehicles']) and (company_lookup[company]['Initial Investment'][0] <= date) and (company_lookup[company]['Status'] == 'Active'):
                 logo_url = company_lookup[company]['Logo'][0]['url'] or ""
                 if company_lookup[company]['CEO'] is not None:
                     founder_txt = "CEO: " + \
@@ -133,7 +145,7 @@ if __name__ == '__main__':
 
                 fd_ownership = 0
                 for summary in summaries:
-                    if (summary['Company'] == company_lookup[company]['Name']) and (summary['Date'] <= "2021-09-30") and (summary['Vehicle'][0] in vehicle_lookup):
+                    if (summary['Company'] == company_lookup[company]['Name']) and (summary['Date'] <= date) and (summary['Vehicle'][0] in vehicle_lookup):
                         if (type(summary['Root FD % (Last Closed Round)']) is dict) or (summary['Root FD % (Last Closed Round)'] is None):
                             fd_ownership = None
                             break
@@ -153,7 +165,6 @@ if __name__ == '__main__':
                 pdf.set_font("Arial", size=12)
 
                 # Title/Overview
-                #pdf.cell(0, 0, txt=company_lookup[company]['Name'])
                 pdf.image(logo_url, x=77.95, y=None, w=60, type='', link='')
                 pdf.set_font('Arial', 'B', 12)
                 pdf.set_y(55)
@@ -198,7 +209,7 @@ if __name__ == '__main__':
                 total_invested = 0.
                 total_fair_value = 0.
                 for summary in summaries:
-                    if (summary['Company'] == company_lookup[company]['Name']) and (summary['Date'] <= "2021-09-30") and (summary['Vehicle'][0] in vehicle_lookup):
+                    if (summary['Company'] == company_lookup[company]['Name']) and (summary['Date'] <= date) and (summary['Vehicle'][0] in vehicle_lookup):
                         total_invested += float(
                             summary['Root Investment'] or 0)
                         total_fair_value += float(summary['Total Value'] or 0)
@@ -243,4 +254,5 @@ if __name__ == '__main__':
                 pdf.multi_cell(
                     0, 7, txt=update_txt2, align="L")
 
-    pdf.output("TestQReport.pdf")
+    file_name = year + "-" + quarter + ".pdf"
+    pdf.output(file_name)
